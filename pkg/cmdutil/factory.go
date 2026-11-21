@@ -9,7 +9,7 @@ import (
 	"github.com/cli/cli/v2/context"
 	"github.com/cli/cli/v2/git"
 	"github.com/cli/cli/v2/internal/browser"
-	"github.com/cli/cli/v2/internal/config"
+	"github.com/cli/cli/v2/internal/gh"
 	"github.com/cli/cli/v2/internal/ghrepo"
 	"github.com/cli/cli/v2/internal/prompter"
 	"github.com/cli/cli/v2/pkg/extensions"
@@ -28,9 +28,13 @@ type Factory struct {
 
 	BaseRepo   func() (ghrepo.Interface, error)
 	Branch     func() (string, error)
-	Config     func() (config.Config, error)
+	Config     func() (gh.Config, error)
 	HttpClient func() (*http.Client, error)
-	Remotes    func() (context.Remotes, error)
+	// PlainHttpClient is a special HTTP client that does not automatically set
+	// auth and other headers. This is meant to be used in situations where the
+	// client needs to specify the headers itself (e.g. during login).
+	PlainHttpClient func() (*http.Client, error)
+	Remotes         func() (context.Remotes, error)
 }
 
 // Executable is the path to the currently invoked binary
@@ -82,7 +86,15 @@ func executable(fallbackName string) string {
 		if p == exe {
 			return p
 		} else if f.Mode()&os.ModeSymlink != 0 {
-			if t, err := os.Readlink(p); err == nil && t == exe {
+			realP, err := filepath.EvalSymlinks(p)
+			if err != nil {
+				continue
+			}
+			realExe, err := filepath.EvalSymlinks(exe)
+			if err != nil {
+				continue
+			}
+			if realP == realExe {
 				return p
 			}
 		}

@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"strings"
 	"time"
+
+	"github.com/cli/cli/v2/pkg/cmdutil"
 )
 
 var CodeFields = []string{
@@ -91,25 +93,29 @@ var PullRequestFields = append(IssueFields,
 type CodeResult struct {
 	IncompleteResults bool   `json:"incomplete_results"`
 	Items             []Code `json:"items"`
-	Total             int    `json:"total_count"`
+	// Number of code search results matching the query on the server. Ignoring limit.
+	Total int `json:"total_count"`
 }
 
 type CommitsResult struct {
 	IncompleteResults bool     `json:"incomplete_results"`
 	Items             []Commit `json:"items"`
-	Total             int      `json:"total_count"`
+	// Number of commits matching the query on the server. Ignoring limit.
+	Total int `json:"total_count"`
 }
 
 type RepositoriesResult struct {
 	IncompleteResults bool         `json:"incomplete_results"`
 	Items             []Repository `json:"items"`
-	Total             int          `json:"total_count"`
+	// Number of repositories matching the query on the server. Ignoring limit.
+	Total int `json:"total_count"`
 }
 
 type IssuesResult struct {
 	IncompleteResults bool    `json:"incomplete_results"`
 	Items             []Issue `json:"items"`
-	Total             int     `json:"total_count"`
+	// Number of isssues matching the query on the server. Ignoring limit.
+	Total int `json:"total_count"`
 }
 
 type Code struct {
@@ -293,16 +299,7 @@ func (code Code) ExportData(fields []string) map[string]interface{} {
 }
 
 func (textMatch TextMatch) ExportData(fields []string) map[string]interface{} {
-	v := reflect.ValueOf(textMatch)
-	data := map[string]interface{}{}
-	for _, f := range fields {
-		switch f {
-		default:
-			sf := fieldByName(v, f)
-			data[f] = sf.Interface()
-		}
-	}
-	return data
+	return cmdutil.StructExportData(textMatch, fields)
 }
 
 func (commit Commit) ExportData(fields []string) map[string]interface{} {

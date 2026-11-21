@@ -7,33 +7,34 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cli/cli/v2/internal/ghinstance"
 	"github.com/cli/cli/v2/utils"
 	ghAPI "github.com/cli/go-gh/v2/pkg/api"
+	ghauth "github.com/cli/go-gh/v2/pkg/auth"
 )
 
 type tokenGetter interface {
-	Token(string) (string, string)
+	ActiveToken(string) (string, string)
 }
 
 type HTTPClientOptions struct {
-	AppVersion        string
-	CacheTTL          time.Duration
-	Config            tokenGetter
-	EnableCache       bool
-	Log               io.Writer
-	LogColorize       bool
-	LogVerboseHTTP    bool
-	SkipAcceptHeaders bool
+	AppVersion         string
+	CacheTTL           time.Duration
+	Config             tokenGetter
+	EnableCache        bool
+	Log                io.Writer
+	LogColorize        bool
+	LogVerboseHTTP     bool
+	SkipDefaultHeaders bool
 }
 
 func NewHTTPClient(opts HTTPClientOptions) (*http.Client, error) {
 	// Provide invalid host, and token values so gh.HTTPClient will not automatically resolve them.
 	// The real host and token are inserted at request time.
 	clientOpts := ghAPI.ClientOptions{
-		Host:         "none",
-		AuthToken:    "none",
-		LogIgnoreEnv: true,
+		Host:               "none",
+		AuthToken:          "none",
+		LogIgnoreEnv:       true,
+		SkipDefaultHeaders: opts.SkipDefaultHeaders,
 	}
 
 	debugEnabled, debugValue := utils.IsDebugEnabled()
@@ -48,10 +49,8 @@ func NewHTTPClient(opts HTTPClientOptions) (*http.Client, error) {
 	}
 
 	headers := map[string]string{
-		userAgent: fmt.Sprintf("GitHub CLI %s", opts.AppVersion),
-	}
-	if opts.SkipAcceptHeaders {
-		headers[accept] = ""
+		userAgent:  fmt.Sprintf("GitHub CLI %s", opts.AppVersion),
+		apiVersion: apiVersionValue,
 	}
 	clientOpts.Headers = headers
 
@@ -90,7 +89,7 @@ func AddCacheTTLHeader(rt http.RoundTripper, ttl time.Duration) http.RoundTrippe
 	}}
 }
 
-// AddAuthToken adds an authentication token header for the host specified by the request.
+// AddAuthTokenHeader adds an authentication token header for the host specified by the request.
 func AddAuthTokenHeader(rt http.RoundTripper, cfg tokenGetter) http.RoundTripper {
 	return &funcTripper{roundTrip: func(req *http.Request) (*http.Response, error) {
 		// If the header is already set in the request, don't overwrite it.
@@ -102,8 +101,8 @@ func AddAuthTokenHeader(rt http.RoundTripper, cfg tokenGetter) http.RoundTripper
 			// Only set header if an initial request or redirect request to the same host as the initial request.
 			// If the host has changed during a redirect do not add the authentication token header.
 			if !redirectHostnameChange {
-				hostname := ghinstance.NormalizeHostname(getHost(req))
-				if token, _ := cfg.Token(hostname); token != "" {
+				hostname := ghauth.NormalizeHostname(getHost(req))
+				if token, _ := cfg.ActiveToken(hostname); token != "" {
 					req.Header.Set(authorization, fmt.Sprintf("token %s", token))
 				}
 			}

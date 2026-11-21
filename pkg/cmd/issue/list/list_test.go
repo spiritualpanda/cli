@@ -8,8 +8,11 @@ import (
 	"time"
 
 	"github.com/MakeNowJust/heredoc"
+	"github.com/cli/cli/v2/api"
 	"github.com/cli/cli/v2/internal/browser"
 	"github.com/cli/cli/v2/internal/config"
+	fd "github.com/cli/cli/v2/internal/featuredetection"
+	"github.com/cli/cli/v2/internal/gh"
 	"github.com/cli/cli/v2/internal/ghrepo"
 	"github.com/cli/cli/v2/internal/run"
 	prShared "github.com/cli/cli/v2/pkg/cmd/pr/shared"
@@ -19,6 +22,7 @@ import (
 	"github.com/cli/cli/v2/test"
 	"github.com/google/shlex"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func runCommand(rt http.RoundTripper, isTTY bool, cli string) (*test.CmdOut, error) {
@@ -32,7 +36,7 @@ func runCommand(rt http.RoundTripper, isTTY bool, cli string) (*test.CmdOut, err
 		HttpClient: func() (*http.Client, error) {
 			return &http.Client{Transport: rt}, nil
 		},
-		Config: func() (config.Config, error) {
+		Config: func() (gh.Config, error) {
 			return config.NewBlankConfig(), nil
 		},
 		BaseRepo: func() (ghrepo.Interface, error) {
@@ -186,50 +190,80 @@ func TestIssueList_disabledIssues(t *testing.T) {
 	}
 }
 
+// TODO advancedIssueSearchCleanup
+// Simplify this test to only a single test case once GHES 3.17 support ends.
 func TestIssueList_web(t *testing.T) {
-	ios, _, stdout, stderr := iostreams.Test()
-	ios.SetStdoutTTY(true)
-	ios.SetStderrTTY(true)
-	browser := &browser.Stub{}
-
-	reg := &httpmock.Registry{}
-	defer reg.Verify(t)
-
-	_, cmdTeardown := run.Stub()
-	defer cmdTeardown(t)
-
-	err := listRun(&ListOptions{
-		IO:      ios,
-		Browser: browser,
-		HttpClient: func() (*http.Client, error) {
-			return &http.Client{Transport: reg}, nil
+	tests := []struct {
+		name     string
+		detector fd.Detector
+	}{
+		{
+			name:     "advanced issue search not supported",
+			detector: fd.AdvancedIssueSearchUnsupported(),
 		},
-		BaseRepo: func() (ghrepo.Interface, error) {
-			return ghrepo.New("OWNER", "REPO"), nil
+		{
+			name:     "advanced issue search supported as opt-in",
+			detector: fd.AdvancedIssueSearchSupportedAsOptIn(),
 		},
-		WebMode:      true,
-		State:        "all",
-		Assignee:     "peter",
-		Author:       "john",
-		Labels:       []string{"bug", "docs"},
-		Mention:      "frank",
-		Milestone:    "v1.1",
-		LimitResults: 10,
-	})
-	if err != nil {
-		t.Errorf("error running command `issue list` with `--web` flag: %v", err)
+		{
+			name:     "advanced issue search supported as only backend",
+			detector: fd.AdvancedIssueSearchSupportedAsOnlyBackend(),
+		},
 	}
 
-	assert.Equal(t, "", stdout.String())
-	assert.Equal(t, "Opening github.com/OWNER/REPO/issues in your browser.\n", stderr.String())
-	browser.Verify(t, "https://github.com/OWNER/REPO/issues?q=assignee%3Apeter+author%3Ajohn+label%3Abug+label%3Adocs+mentions%3Afrank+milestone%3Av1.1+type%3Aissue")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ios, _, stdout, stderr := iostreams.Test()
+			ios.SetStdoutTTY(true)
+			ios.SetStderrTTY(true)
+			browser := &browser.Stub{}
+
+			reg := &httpmock.Registry{}
+			defer reg.Verify(t)
+
+			_, cmdTeardown := run.Stub()
+			defer cmdTeardown(t)
+
+			opts := &ListOptions{
+				IO:      ios,
+				Browser: browser,
+				HttpClient: func() (*http.Client, error) {
+					return &http.Client{Transport: reg}, nil
+				},
+				BaseRepo: func() (ghrepo.Interface, error) {
+					return ghrepo.New("OWNER", "REPO"), nil
+				},
+				Detector:     tt.detector,
+				WebMode:      true,
+				State:        "all",
+				Assignee:     "peter",
+				Author:       "john",
+				Labels:       []string{"bug", "docs"},
+				Mention:      "frank",
+				Milestone:    "v1.1",
+				LimitResults: 10,
+			}
+
+			err := listRun(opts)
+			require.NoError(t, err)
+
+			assert.Equal(t, "", stdout.String())
+			assert.Equal(t, "Opening https://github.com/OWNER/REPO/issues in your browser.\n", stderr.String())
+
+			// Since no repeated usage of special search qualifiers is possible
+			// with our current implementation, we can assert against the same
+			// URL for both search backend (i.e. legacy and advanced issue search).
+			browser.Verify(t, "https://github.com/OWNER/REPO/issues?q=assignee%3Apeter+author%3Ajohn+label%3Abug+label%3Adocs+mentions%3Afrank+milestone%3Av1.1+type%3Aissue")
+		})
+	}
 }
 
 func Test_issueList(t *testing.T) {
 	type args struct {
-		repo    ghrepo.Interface
-		filters prShared.FilterOptions
-		limit   int
+		detector fd.Detector
+		repo     ghrepo.Interface
+		filters  prShared.FilterOptions
+		limit    int
 	}
 	tests := []struct {
 		name      string
@@ -267,8 +301,11 @@ func Test_issueList(t *testing.T) {
 		{
 			name: "milestone by number",
 			args: args{
-				limit: 30,
-				repo:  ghrepo.New("OWNER", "REPO"),
+				// TODO advancedIssueSearchCleanup
+				// No need for feature detection once GHES 3.17 support ends.
+				detector: fd.AdvancedIssueSearchSupportedAsOptIn(),
+				limit:    30,
+				repo:     ghrepo.New("OWNER", "REPO"),
 				filters: prShared.FilterOptions{
 					Entity:    "issue",
 					State:     "open",
@@ -298,7 +335,7 @@ func Test_issueList(t *testing.T) {
 							"repo":  "REPO",
 							"limit": float64(30),
 							"query": "milestone:1.x repo:OWNER/REPO state:open type:issue",
-							"type":  "ISSUE",
+							"type":  "ISSUE_ADVANCED",
 						}, params)
 					}))
 			},
@@ -306,8 +343,11 @@ func Test_issueList(t *testing.T) {
 		{
 			name: "milestone by title",
 			args: args{
-				limit: 30,
-				repo:  ghrepo.New("OWNER", "REPO"),
+				// TODO advancedIssueSearchCleanup
+				// No need for feature detection once GHES 3.17 support ends.
+				detector: fd.AdvancedIssueSearchSupportedAsOptIn(),
+				limit:    30,
+				repo:     ghrepo.New("OWNER", "REPO"),
 				filters: prShared.FilterOptions{
 					Entity:    "issue",
 					State:     "open",
@@ -330,7 +370,7 @@ func Test_issueList(t *testing.T) {
 							"repo":  "REPO",
 							"limit": float64(30),
 							"query": "milestone:1.x repo:OWNER/REPO state:open type:issue",
-							"type":  "ISSUE",
+							"type":  "ISSUE_ADVANCED",
 						}, params)
 					}))
 			},
@@ -374,8 +414,11 @@ func Test_issueList(t *testing.T) {
 		{
 			name: "@me with search",
 			args: args{
-				limit: 30,
-				repo:  ghrepo.New("OWNER", "REPO"),
+				// TODO advancedIssueSearchCleanup
+				// No need for feature detection once GHES 3.17 support ends.
+				detector: fd.AdvancedIssueSearchSupportedAsOptIn(),
+				limit:    30,
+				repo:     ghrepo.New("OWNER", "REPO"),
 				filters: prShared.FilterOptions{
 					Entity:   "issue",
 					State:    "open",
@@ -400,8 +443,8 @@ func Test_issueList(t *testing.T) {
 							"owner": "OWNER",
 							"repo":  "REPO",
 							"limit": float64(30),
-							"query": "auth bug assignee:@me author:@me mentions:@me repo:OWNER/REPO state:open type:issue",
-							"type":  "ISSUE",
+							"query": "( auth bug ) assignee:@me author:@me mentions:@me repo:OWNER/REPO state:open type:issue",
+							"type":  "ISSUE_ADVANCED",
 						}, params)
 					}))
 			},
@@ -409,8 +452,11 @@ func Test_issueList(t *testing.T) {
 		{
 			name: "with labels",
 			args: args{
-				limit: 30,
-				repo:  ghrepo.New("OWNER", "REPO"),
+				// TODO advancedIssueSearchCleanup
+				// No need for feature detection once GHES 3.17 support ends.
+				detector: fd.AdvancedIssueSearchSupportedAsOptIn(),
+				limit:    30,
+				repo:     ghrepo.New("OWNER", "REPO"),
 				filters: prShared.FilterOptions{
 					Entity: "issue",
 					State:  "open",
@@ -433,7 +479,7 @@ func Test_issueList(t *testing.T) {
 							"repo":  "REPO",
 							"limit": float64(30),
 							"query": `label:"one world" label:hello repo:OWNER/REPO state:open type:issue`,
-							"type":  "ISSUE",
+							"type":  "ISSUE_ADVANCED",
 						}, params)
 					}))
 			},
@@ -447,7 +493,7 @@ func Test_issueList(t *testing.T) {
 				tt.httpStubs(httpreg)
 			}
 			client := &http.Client{Transport: httpreg}
-			_, err := issueList(client, tt.args.repo, tt.args.filters, tt.args.limit)
+			_, err := issueList(client, tt.args.detector, tt.args.repo, tt.args.filters, tt.args.limit)
 			if tt.wantErr {
 				assert.Error(t, err)
 			} else {
@@ -455,4 +501,156 @@ func Test_issueList(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestIssueList_withProjectItems(t *testing.T) {
+	reg := &httpmock.Registry{}
+	defer reg.Verify(t)
+
+	reg.Register(
+		httpmock.GraphQL(`query IssueList\b`),
+		httpmock.GraphQLQuery(`{
+			"data": {
+			  "repository": {
+				"hasIssuesEnabled": true,
+				"issues": {
+				  "totalCount": 1,
+				  "nodes": [
+					{
+					  "projectItems": {
+						"nodes": [
+						  {
+							"id": "PVTI_lAHOAA3WC84AW6WNzgJ8rnQ",
+							"project": {
+							  "id": "PVT_kwHOAA3WC84AW6WN",
+							  "title": "Test Public Project"
+							},
+							"status": {
+							  "optionId": "47fc9ee4",
+							  "name": "In Progress"
+							}
+						  }
+						],
+						"totalCount": 1
+					  }
+					}
+				  ]
+				}
+			  }
+			}
+		  }`, func(_ string, params map[string]interface{}) {
+			require.Equal(t, map[string]interface{}{
+				"owner":  "OWNER",
+				"repo":   "REPO",
+				"limit":  float64(30),
+				"states": []interface{}{"OPEN"},
+			}, params)
+		}))
+
+	client := &http.Client{Transport: reg}
+	issuesAndTotalCount, err := issueList(
+		client,
+		nil,
+		ghrepo.New("OWNER", "REPO"),
+		prShared.FilterOptions{
+			Entity: "issue",
+		},
+		30,
+	)
+
+	require.NoError(t, err)
+	require.Len(t, issuesAndTotalCount.Issues, 1)
+	require.Len(t, issuesAndTotalCount.Issues[0].ProjectItems.Nodes, 1)
+
+	require.Equal(t, issuesAndTotalCount.Issues[0].ProjectItems.Nodes[0].ID, "PVTI_lAHOAA3WC84AW6WNzgJ8rnQ")
+
+	expectedProject := api.ProjectV2ItemProject{
+		ID:    "PVT_kwHOAA3WC84AW6WN",
+		Title: "Test Public Project",
+	}
+	require.Equal(t, issuesAndTotalCount.Issues[0].ProjectItems.Nodes[0].Project, expectedProject)
+
+	expectedStatus := api.ProjectV2ItemStatus{
+		OptionID: "47fc9ee4",
+		Name:     "In Progress",
+	}
+	require.Equal(t, issuesAndTotalCount.Issues[0].ProjectItems.Nodes[0].Status, expectedStatus)
+}
+
+func TestIssueList_Search_withProjectItems(t *testing.T) {
+	reg := &httpmock.Registry{}
+	defer reg.Verify(t)
+
+	reg.Register(
+		httpmock.GraphQL(`query IssueSearch\b`),
+		httpmock.GraphQLQuery(`{
+			"data": {
+			  "repository": {
+				"hasIssuesEnabled": true
+			  },
+			  "search": {
+				"issueCount": 1,
+				"nodes": [
+				  {
+					"projectItems": {
+					  "nodes": [
+						{
+						  "id": "PVTI_lAHOAA3WC84AW6WNzgJ8rl0",
+						  "project": {
+							"id": "PVT_kwHOAA3WC84AW6WN",
+							"title": "Test Public Project"
+						  },
+						  "status": {
+							"optionId": "47fc9ee4",
+							"name": "In Progress"
+						  }
+						}
+					  ],
+					  "totalCount": 1
+					}
+				  }
+				]
+			  }
+			}
+		  }`, func(_ string, params map[string]interface{}) {
+			require.Equal(t, map[string]interface{}{
+				"owner": "OWNER",
+				"repo":  "REPO",
+				"type":  "ISSUE_ADVANCED",
+				"limit": float64(30),
+				"query": "( just used to force the search API branch ) repo:OWNER/REPO type:issue",
+			}, params)
+		}))
+
+	client := &http.Client{Transport: reg}
+	issuesAndTotalCount, err := issueList(
+		client,
+		// TODO advancedIssueSearchCleanup
+		// No need for feature detection once GHES 3.17 support ends.
+		fd.AdvancedIssueSearchSupportedAsOptIn(),
+		ghrepo.New("OWNER", "REPO"),
+		prShared.FilterOptions{
+			Entity: "issue",
+			Search: "just used to force the search API branch",
+		},
+		30,
+	)
+
+	require.NoError(t, err)
+	require.Len(t, issuesAndTotalCount.Issues, 1)
+	require.Len(t, issuesAndTotalCount.Issues[0].ProjectItems.Nodes, 1)
+
+	require.Equal(t, issuesAndTotalCount.Issues[0].ProjectItems.Nodes[0].ID, "PVTI_lAHOAA3WC84AW6WNzgJ8rl0")
+
+	expectedProject := api.ProjectV2ItemProject{
+		ID:    "PVT_kwHOAA3WC84AW6WN",
+		Title: "Test Public Project",
+	}
+	require.Equal(t, issuesAndTotalCount.Issues[0].ProjectItems.Nodes[0].Project, expectedProject)
+
+	expectedStatus := api.ProjectV2ItemStatus{
+		OptionID: "47fc9ee4",
+		Name:     "In Progress",
+	}
+	require.Equal(t, issuesAndTotalCount.Issues[0].ProjectItems.Nodes[0].Status, expectedStatus)
 }

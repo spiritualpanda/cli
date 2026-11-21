@@ -20,6 +20,25 @@ func shortenQuery(q string) string {
 	return strings.Map(squeeze, q)
 }
 
+var assignedActors = shortenQuery(`
+	assignedActors(first: 10) {
+		nodes {
+			...on User {
+				id,
+				login,
+				name,
+				__typename
+			}
+			...on Bot {
+				id,
+				login,
+				__typename
+			}
+		},
+		totalCount
+	}
+`)
+
 var issueComments = shortenQuery(`
 	comments(first: 100) {
 		nodes {
@@ -56,12 +75,35 @@ var issueCommentLast = shortenQuery(`
 	}
 `)
 
+var issueClosedByPullRequestsReferences = shortenQuery(`
+	closedByPullRequestsReferences(first: 100) {
+		nodes {
+			id,
+			number,
+			url,
+			repository {
+				id,
+				name,
+				owner {
+					id,
+					login
+				}
+			}
+		}
+		pageInfo{hasNextPage,endCursor}
+	}
+`)
+
+// prReviewRequests includes ...on Bot to support Copilot as a reviewer on github.com.
+// On GHES, Bot is not part of the RequestedReviewer union, but the fragment is
+// silently ignored (verified on GHES 3.19).
 var prReviewRequests = shortenQuery(`
 	reviewRequests(first: 100) {
 		nodes {
 			requestedReviewer {
 				__typename,
-				...on User{login},
+				...on User{login,name},
+				...on Bot{login},
 				...on Team{
 					organization{login}
 					name,
@@ -132,6 +174,25 @@ var prCommits = shortenQuery(`
 	}
 `)
 
+var prClosingIssuesReferences = shortenQuery(`
+	closingIssuesReferences(first: 100) {
+		nodes {
+			id,
+			number,
+			url,
+			repository {
+				id,
+				name,
+				owner {
+					id,
+					login
+				}
+			}
+		}
+		pageInfo{hasNextPage,endCursor}
+	}
+`)
+
 var autoMergeRequest = shortenQuery(`
 	autoMergeRequest {
 		authorEmail,
@@ -152,13 +213,13 @@ func StatusCheckRollupGraphQLWithCountByState() string {
 					contexts {
 						checkRunCount,
 						checkRunCountsByState {
-						  state,
-						  count
+							state,
+							count
 						},
 						statusContextCount,
 						statusContextCountsByState {
-						  state,
-						  count
+							state,
+							count
 						}
 					}
 				}
@@ -249,7 +310,7 @@ func RequiredStatusCheckRollupGraphQL(prID, after string, includeEvent bool) str
 	}`), afterClause, prID, eventField)
 }
 
-var IssueFields = []string{
+var sharedIssuePRFields = []string{
 	"assignees",
 	"author",
 	"body",
@@ -270,14 +331,29 @@ var IssueFields = []string{
 	"url",
 }
 
-var PullRequestFields = append(IssueFields,
+// Some fields are only valid in the context of issues.
+// They need to be enumerated separately in order to be filtered
+// from existing code that expects to be able to pass Issue fields
+// to PR queries, e.g. the PullRequestGraphql function.
+var issueOnlyFields = []string{
+	"isPinned",
+	"stateReason",
+	"closedByPullRequestsReferences",
+}
+
+var IssueFields = append(sharedIssuePRFields, issueOnlyFields...)
+
+var PullRequestFields = append(sharedIssuePRFields,
 	"additions",
 	"autoMergeRequest",
 	"baseRefName",
+	"baseRefOid",
 	"changedFiles",
+	"closingIssuesReferences",
 	"commits",
 	"deletions",
 	"files",
+	"fullDatabaseId",
 	"headRefName",
 	"headRefOid",
 	"headRepository",
@@ -313,6 +389,8 @@ func IssueGraphQL(fields []string) string {
 			q = append(q, `headRepository{id,name}`)
 		case "assignees":
 			q = append(q, `assignees(first:100){nodes{id,login,name},totalCount}`)
+		case "assignedActors":
+			q = append(q, assignedActors)
 		case "labels":
 			q = append(q, `labels(first:100){nodes{id,name,description,color},totalCount}`)
 		case "projectCards":
@@ -353,6 +431,10 @@ func IssueGraphQL(fields []string) string {
 			q = append(q, StatusCheckRollupGraphQLWithoutCountByState(""))
 		case "statusCheckRollupWithCountByState": // pseudo-field
 			q = append(q, StatusCheckRollupGraphQLWithCountByState())
+		case "closingIssuesReferences":
+			q = append(q, prClosingIssuesReferences)
+		case "closedByPullRequestsReferences":
+			q = append(q, issueClosedByPullRequestsReferences)
 		default:
 			q = append(q, field)
 		}
@@ -363,10 +445,9 @@ func IssueGraphQL(fields []string) string {
 // PullRequestGraphQL constructs a GraphQL query fragment for a set of pull request fields.
 // It will try to sanitize the fields to just those available on pull request.
 func PullRequestGraphQL(fields []string) string {
-	invalidFields := []string{"isPinned", "stateReason"}
 	s := set.NewStringSet()
 	s.AddValues(fields)
-	s.RemoveValues(invalidFields)
+	s.RemoveValues(issueOnlyFields)
 	return IssueGraphQL(s.ToSlice())
 }
 
@@ -389,6 +470,7 @@ var RepositoryFields = []string{
 	"createdAt",
 	"pushedAt",
 	"updatedAt",
+	"archivedAt",
 
 	"isBlankIssuesEnabled",
 	"isSecurityPolicyEnabled",
@@ -442,6 +524,7 @@ var RepositoryFields = []string{
 	"assignableUsers",
 	"mentionableUsers",
 	"projects",
+	"projectsV2",
 
 	// "branchProtectionRules", // too complex to expose
 	// "collaborators", // does it make sense to expose without affiliation filter?
@@ -487,6 +570,8 @@ func RepositoryGraphQL(fields []string) string {
 			q = append(q, "mentionableUsers(first:100){nodes{id,login,name}}")
 		case "projects":
 			q = append(q, "projects(first:100,states:OPEN){nodes{id,name,number,body,resourcePath}}")
+		case "projectsV2":
+			q = append(q, "projectsV2(first:100,query:\"is:open\"){nodes{id,number,title,resourcePath,closed,url}}")
 		case "watchers":
 			q = append(q, "watchers{totalCount}")
 		case "issues":

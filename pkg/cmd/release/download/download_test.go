@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/cli/cli/v2/internal/ghrepo"
@@ -173,15 +174,11 @@ func Test_NewCmdDownload(t *testing.T) {
 }
 
 func Test_downloadRun(t *testing.T) {
-	oldwd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("could not determine working directory: %v", err)
-	}
-
 	tests := []struct {
 		name       string
 		isTTY      bool
 		opts       DownloadOptions
+		httpStubs  func(*httpmock.Registry)
 		wantErr    string
 		wantStdout string
 		wantStderr string
@@ -194,6 +191,24 @@ func Test_downloadRun(t *testing.T) {
 				TagName:     "v1.2.3",
 				Destination: ".",
 				Concurrency: 2,
+			},
+			httpStubs: func(reg *httpmock.Registry) {
+				shared.StubFetchRelease(t, reg, "OWNER", "REPO", "v1.2.3", `{
+					"assets": [
+						{ "name": "windows-32bit.zip", "size": 12,
+						"url": "https://api.github.com/assets/1234" },
+						{ "name": "windows-64bit.zip", "size": 34,
+						"url": "https://api.github.com/assets/3456" },
+						{ "name": "linux.tgz", "size": 56,
+						"url": "https://api.github.com/assets/5678" }
+					],
+					"tarball_url": "https://api.github.com/repos/OWNER/REPO/tarball/v1.2.3",
+					"zipball_url": "https://api.github.com/repos/OWNER/REPO/zipball/v1.2.3"
+				}`)
+
+				reg.Register(httpmock.REST("GET", "assets/1234"), httpmock.StringResponse(`1234`))
+				reg.Register(httpmock.REST("GET", "assets/3456"), httpmock.StringResponse(`3456`))
+				reg.Register(httpmock.REST("GET", "assets/5678"), httpmock.StringResponse(`5678`))
 			},
 			wantStdout: ``,
 			wantStderr: ``,
@@ -212,6 +227,23 @@ func Test_downloadRun(t *testing.T) {
 				Destination:  "tmp/assets",
 				Concurrency:  2,
 			},
+			httpStubs: func(reg *httpmock.Registry) {
+				shared.StubFetchRelease(t, reg, "OWNER", "REPO", "v1.2.3", `{
+					"assets": [
+						{ "name": "windows-32bit.zip", "size": 12,
+						"url": "https://api.github.com/assets/1234" },
+						{ "name": "windows-64bit.zip", "size": 34,
+						"url": "https://api.github.com/assets/3456" },
+						{ "name": "linux.tgz", "size": 56,
+						"url": "https://api.github.com/assets/5678" }
+					],
+					"tarball_url": "https://api.github.com/repos/OWNER/REPO/tarball/v1.2.3",
+					"zipball_url": "https://api.github.com/repos/OWNER/REPO/zipball/v1.2.3"
+				}`)
+
+				reg.Register(httpmock.REST("GET", "assets/1234"), httpmock.StringResponse(`1234`))
+				reg.Register(httpmock.REST("GET", "assets/3456"), httpmock.StringResponse(`3456`))
+			},
 			wantStdout: ``,
 			wantStderr: ``,
 			wantFiles: []string{
@@ -228,6 +260,20 @@ func Test_downloadRun(t *testing.T) {
 				Destination:  ".",
 				Concurrency:  2,
 			},
+			httpStubs: func(reg *httpmock.Registry) {
+				shared.StubFetchRelease(t, reg, "OWNER", "REPO", "v1.2.3", `{
+					"assets": [
+						{ "name": "windows-32bit.zip", "size": 12,
+						"url": "https://api.github.com/assets/1234" },
+						{ "name": "windows-64bit.zip", "size": 34,
+						"url": "https://api.github.com/assets/3456" },
+						{ "name": "linux.tgz", "size": 56,
+						"url": "https://api.github.com/assets/5678" }
+					],
+					"tarball_url": "https://api.github.com/repos/OWNER/REPO/tarball/v1.2.3",
+					"zipball_url": "https://api.github.com/repos/OWNER/REPO/zipball/v1.2.3"
+				}`)
+			},
 			wantStdout: ``,
 			wantStderr: ``,
 			wantErr:    "no assets match the file pattern",
@@ -240,6 +286,30 @@ func Test_downloadRun(t *testing.T) {
 				ArchiveType: "zip",
 				Destination: "tmp/packages",
 				Concurrency: 2,
+			},
+			httpStubs: func(reg *httpmock.Registry) {
+				shared.StubFetchRelease(t, reg, "OWNER", "REPO", "v1.2.3", `{
+					"assets": [
+						{ "name": "windows-32bit.zip", "size": 12,
+						"url": "https://api.github.com/assets/1234" },
+						{ "name": "windows-64bit.zip", "size": 34,
+						"url": "https://api.github.com/assets/3456" },
+						{ "name": "linux.tgz", "size": 56,
+						"url": "https://api.github.com/assets/5678" }
+					],
+					"tarball_url": "https://api.github.com/repos/OWNER/REPO/tarball/v1.2.3",
+					"zipball_url": "https://api.github.com/repos/OWNER/REPO/zipball/v1.2.3"
+				}`)
+
+				reg.Register(
+					httpmock.REST(
+						"GET",
+						"repos/OWNER/REPO/zipball/v1.2.3",
+					),
+					httpmock.WithHeader(
+						httpmock.StringResponse("somedata"), "content-disposition", "attachment; filename=zipball.zip",
+					),
+				)
 			},
 			wantStdout: ``,
 			wantStderr: ``,
@@ -255,6 +325,30 @@ func Test_downloadRun(t *testing.T) {
 				ArchiveType: "tar.gz",
 				Destination: "tmp/packages",
 				Concurrency: 2,
+			},
+			httpStubs: func(reg *httpmock.Registry) {
+				shared.StubFetchRelease(t, reg, "OWNER", "REPO", "v1.2.3", `{
+					"assets": [
+						{ "name": "windows-32bit.zip", "size": 12,
+						"url": "https://api.github.com/assets/1234" },
+						{ "name": "windows-64bit.zip", "size": 34,
+						"url": "https://api.github.com/assets/3456" },
+						{ "name": "linux.tgz", "size": 56,
+						"url": "https://api.github.com/assets/5678" }
+					],
+					"tarball_url": "https://api.github.com/repos/OWNER/REPO/tarball/v1.2.3",
+					"zipball_url": "https://api.github.com/repos/OWNER/REPO/zipball/v1.2.3"
+				}`)
+
+				reg.Register(
+					httpmock.REST(
+						"GET",
+						"repos/OWNER/REPO/tarball/v1.2.3",
+					),
+					httpmock.WithHeader(
+						httpmock.StringResponse("somedata"), "content-disposition", "attachment; filename=tarball.tgz",
+					),
+				)
 			},
 			wantStdout: ``,
 			wantStderr: ``,
@@ -272,6 +366,30 @@ func Test_downloadRun(t *testing.T) {
 				Concurrency: 2,
 				ArchiveType: "tar.gz",
 			},
+			httpStubs: func(reg *httpmock.Registry) {
+				shared.StubFetchRelease(t, reg, "OWNER", "REPO", "v1.2.3", `{
+					"assets": [
+						{ "name": "windows-32bit.zip", "size": 12,
+						"url": "https://api.github.com/assets/1234" },
+						{ "name": "windows-64bit.zip", "size": 34,
+						"url": "https://api.github.com/assets/3456" },
+						{ "name": "linux.tgz", "size": 56,
+						"url": "https://api.github.com/assets/5678" }
+					],
+					"tarball_url": "https://api.github.com/repos/OWNER/REPO/tarball/v1.2.3",
+					"zipball_url": "https://api.github.com/repos/OWNER/REPO/zipball/v1.2.3"
+				}`)
+
+				reg.Register(
+					httpmock.REST(
+						"GET",
+						"repos/OWNER/REPO/tarball/v1.2.3",
+					),
+					httpmock.WithHeader(
+						httpmock.StringResponse("somedata"), "content-disposition", "attachment; filename=tarball.tgz",
+					),
+				)
+			},
 			wantStdout: ``,
 			wantStderr: ``,
 			wantFiles: []string{
@@ -279,7 +397,7 @@ func Test_downloadRun(t *testing.T) {
 			},
 		},
 		{
-			name:  "download single asset from matching patter into output option",
+			name:  "download single asset from matching pattern into output option",
 			isTTY: true,
 			opts: DownloadOptions{
 				OutputFile:   "./tmp/my-tarball.tgz",
@@ -288,6 +406,22 @@ func Test_downloadRun(t *testing.T) {
 				Concurrency:  2,
 				FilePatterns: []string{"*windows-32bit.zip"},
 			},
+			httpStubs: func(reg *httpmock.Registry) {
+				shared.StubFetchRelease(t, reg, "OWNER", "REPO", "v1.2.3", `{
+					"assets": [
+						{ "name": "windows-32bit.zip", "size": 12,
+						"url": "https://api.github.com/assets/1234" },
+						{ "name": "windows-64bit.zip", "size": 34,
+						"url": "https://api.github.com/assets/3456" },
+						{ "name": "linux.tgz", "size": 56,
+						"url": "https://api.github.com/assets/5678" }
+					],
+					"tarball_url": "https://api.github.com/repos/OWNER/REPO/tarball/v1.2.3",
+					"zipball_url": "https://api.github.com/repos/OWNER/REPO/zipball/v1.2.3"
+				}`)
+
+				reg.Register(httpmock.REST("GET", "assets/1234"), httpmock.StringResponse(`1234`))
+			},
 			wantStdout: ``,
 			wantStderr: ``,
 			wantFiles: []string{
@@ -295,7 +429,7 @@ func Test_downloadRun(t *testing.T) {
 			},
 		},
 		{
-			name:  "download single asset from matching patter into output 'stdout´",
+			name:  "download single asset from matching pattern into output 'stdout´",
 			isTTY: true,
 			opts: DownloadOptions{
 				OutputFile:   "-",
@@ -304,18 +438,90 @@ func Test_downloadRun(t *testing.T) {
 				Concurrency:  2,
 				FilePatterns: []string{"*windows-32bit.zip"},
 			},
+			httpStubs: func(reg *httpmock.Registry) {
+				shared.StubFetchRelease(t, reg, "OWNER", "REPO", "v1.2.3", `{
+					"assets": [
+						{ "name": "windows-32bit.zip", "size": 12,
+						"url": "https://api.github.com/assets/1234" },
+						{ "name": "windows-64bit.zip", "size": 34,
+						"url": "https://api.github.com/assets/3456" },
+						{ "name": "linux.tgz", "size": 56,
+						"url": "https://api.github.com/assets/5678" }
+					],
+					"tarball_url": "https://api.github.com/repos/OWNER/REPO/tarball/v1.2.3",
+					"zipball_url": "https://api.github.com/repos/OWNER/REPO/zipball/v1.2.3"
+				}`)
+
+				reg.Register(httpmock.REST("GET", "assets/1234"), httpmock.StringResponse(`1234`))
+			},
 			wantStdout: `1234`,
 			wantStderr: ``,
+		},
+		{
+			name:  "draft release with null tarball_url and zipball_url",
+			isTTY: true,
+			opts: DownloadOptions{
+				TagName:     "v1.2.3",
+				ArchiveType: "tar.gz",
+				Destination: "tmp/packages",
+				Concurrency: 2,
+			},
+			httpStubs: func(reg *httpmock.Registry) {
+				shared.StubFetchRelease(t, reg, "OWNER", "REPO", "v1.2.3", `{
+					"tag_name": "v1.2.3",
+					"name": "patch-36",
+					"assets": [
+						{ "name": "windows-32bit.zip", "size": 12,
+						  "url": "https://api.github.com/assets/1234" },
+						{ "name": "windows-64bit.zip", "size": 34,
+						  "url": "https://api.github.com/assets/3456" },
+						{ "name": "linux.tgz", "size": 56,
+						  "url": "https://api.github.com/assets/5678" }
+					],
+					"tarball_url": null,
+					"zipball_url": null,
+					"draft": true
+				}`)
+			},
+			wantStdout: ``,
+			wantStderr: ``,
+			wantErr:    "release \"patch-36\" with tag \"v1.2.3\", does not have a \"tar.gz\" archive asset. Most likely, this is because it is a draft.",
+		},
+		{
+			name:  "non-draft release with null tarball_url and zipball_url",
+			isTTY: true,
+			opts: DownloadOptions{
+				TagName:     "v1.2.3",
+				ArchiveType: "tar.gz",
+				Destination: "tmp/packages",
+				Concurrency: 2,
+			},
+			httpStubs: func(reg *httpmock.Registry) {
+				shared.StubFetchRelease(t, reg, "OWNER", "REPO", "v1.2.3", `{
+					"tag_name": "v1.2.3",
+					"name": "patch-36",
+					"assets": [
+						{ "name": "windows-32bit.zip", "size": 12,
+						  "url": "https://api.github.com/assets/1234" },
+						{ "name": "windows-64bit.zip", "size": 34,
+						  "url": "https://api.github.com/assets/3456" },
+						{ "name": "linux.tgz", "size": 56,
+						  "url": "https://api.github.com/assets/5678" }
+					],
+					"tarball_url": null,
+					"zipball_url": null,
+					"draft": false
+				}`)
+			},
+			wantStdout: ``,
+			wantStderr: ``,
+			wantErr:    "release \"patch-36\" with tag \"v1.2.3\", does not have a \"tar.gz\" archive asset.",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tempDir := t.TempDir()
-			if err := os.Chdir(tempDir); err == nil {
-				t.Cleanup(func() { _ = os.Chdir(oldwd) })
-			} else {
-				t.Fatal(err)
-			}
+			t.Chdir(tempDir)
 
 			ios, _, stdout, stderr := iostreams.Test()
 			ios.SetStdoutTTY(tt.isTTY)
@@ -323,41 +529,11 @@ func Test_downloadRun(t *testing.T) {
 			ios.SetStderrTTY(tt.isTTY)
 
 			fakeHTTP := &httpmock.Registry{}
-			shared.StubFetchRelease(t, fakeHTTP, "OWNER", "REPO", tt.opts.TagName, `{
-				"assets": [
-					{ "name": "windows-32bit.zip", "size": 12,
-					  "url": "https://api.github.com/assets/1234" },
-					{ "name": "windows-64bit.zip", "size": 34,
-					  "url": "https://api.github.com/assets/3456" },
-					{ "name": "linux.tgz", "size": 56,
-					  "url": "https://api.github.com/assets/5678" }
-				],
-				"tarball_url": "https://api.github.com/repos/OWNER/REPO/tarball/v1.2.3",
-				"zipball_url": "https://api.github.com/repos/OWNER/REPO/zipball/v1.2.3"
-			}`)
-			fakeHTTP.Register(httpmock.REST("GET", "assets/1234"), httpmock.StringResponse(`1234`))
-			fakeHTTP.Register(httpmock.REST("GET", "assets/3456"), httpmock.StringResponse(`3456`))
-			fakeHTTP.Register(httpmock.REST("GET", "assets/5678"), httpmock.StringResponse(`5678`))
+			defer fakeHTTP.Verify(t)
 
-			fakeHTTP.Register(
-				httpmock.REST(
-					"GET",
-					"repos/OWNER/REPO/tarball/v1.2.3",
-				),
-				httpmock.WithHeader(
-					httpmock.StringResponse("somedata"), "content-disposition", "attachment; filename=tarball.tgz",
-				),
-			)
-
-			fakeHTTP.Register(
-				httpmock.REST(
-					"GET",
-					"repos/OWNER/REPO/zipball/v1.2.3",
-				),
-				httpmock.WithHeader(
-					httpmock.StringResponse("somedata"), "content-disposition", "attachment; filename=zipball.zip",
-				),
-			)
+			if tt.httpStubs != nil {
+				tt.httpStubs(fakeHTTP)
+			}
 
 			tt.opts.IO = ios
 			tt.opts.HttpClient = func() (*http.Client, error) {
@@ -549,6 +725,87 @@ func Test_downloadRun_cloberAndSkip(t *testing.T) {
 			assert.NoError(t, err)
 			assert.Equal(t, tt.wantFileSize, fs.Size())
 			assert.Equal(t, tt.wantArchiveSize, as.Size())
+		})
+	}
+}
+
+func Test_downloadRun_windowsReservedFilename(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.SkipNow()
+	}
+
+	tagName := "v1.2.3"
+
+	ios, _, _, _ := iostreams.Test()
+
+	reg := &httpmock.Registry{}
+	defer reg.Verify(t)
+
+	shared.StubFetchRelease(t, reg, "OWNER", "REPO", tagName, `{
+		"assets": [
+			{ "name": "valid-asset.zip", "size": 12,
+			  "url": "https://api.github.com/assets/1234" },
+			{ "name": "valid-asset-2.zip", "size": 34,
+			  "url": "https://api.github.com/assets/3456" },
+			{ "name": "CON.tgz", "size": 56,
+			  "url": "https://api.github.com/assets/5678" }
+		],
+		"tarball_url": "https://api.github.com/repos/OWNER/REPO/tarball/v1.2.3",
+		"zipball_url": "https://api.github.com/repos/OWNER/REPO/zipball/v1.2.3"
+	}`)
+
+	opts := &DownloadOptions{
+		IO: ios,
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{Transport: reg}, nil
+		},
+		BaseRepo: func() (ghrepo.Interface, error) {
+			return ghrepo.FromFullName("OWNER/REPO")
+		},
+		TagName: tagName,
+	}
+
+	err := downloadRun(opts)
+
+	assert.EqualError(t, err, `unable to download release due to asset with reserved filename "CON.tgz"`)
+}
+
+func TestIsWindowsReservedFilename(t *testing.T) {
+	tests := []struct {
+		name     string
+		filename string
+		want     bool
+	}{
+		{
+			name:     "non-reserved filename",
+			filename: "test",
+			want:     false,
+		},
+		{
+			name:     "non-reserved filename with file type extension",
+			filename: "test.tar.gz",
+			want:     false,
+		},
+		{
+			name:     "reserved filename",
+			filename: "NUL",
+			want:     true,
+		},
+		{
+			name:     "reserved filename with file type extension",
+			filename: "NUL.tar.gz",
+			want:     true,
+		},
+		{
+			name:     "reserved filename with mixed type case",
+			filename: "NuL",
+			want:     true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isWindowsReservedFilename(tt.filename))
 		})
 	}
 }

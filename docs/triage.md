@@ -1,57 +1,89 @@
 # Triage role
 
-As we get more issues and pull requests opened on the GitHub CLI, we've decided on a weekly rotation
-triage role. The initial expectation is that the person in the role for the week spends no more than
-2 hours a day on this work; we can refine that as needed.
+As we get more issues and pull requests opened on the GitHub CLI, we've decided on a weekly rotation triage role as defined by our First Responder (FR) rotation. The primary responsibility of the FR during that week is to triage incoming issues from the Open Source community, as defined below. An issue is considered "triaged" when the `needs-triage` label is removed.
 
-## Expectations for incoming issues
+## Expectations for triaging incoming issues
 
-Review and label [open issues missing either the `enhancement`, `bug`, or `docs` label](https://github.com/cli/cli/issues?q=is%3Aopen+is%3Aissue+-label%3Abug%2Cenhancement%2Cdocs+).
+Review and label [open issues missing either the `enhancement`, `bug`, or `docs` label](https://github.com/cli/cli/issues?q=is%3Aopen+is%3Aissue+-label%3Abug%2Cenhancement%2Cdocs+) and the label(s) corresponding to the command space prefixed with `gh-`, such as `gh-pr` for the `gh pr` command set, or `gh-extension` for the `gh extension` command set. 
 
-To be considered triaged, `enhancement` issues require at least one of the following additional labels:
+The heuristics for triaging the different issue types are as follows:
 
-- `core`: reserved for the core CLI team
-- `help wanted`: signal that we are accepting contributions for this
-- `discuss`: add to our team's queue to discuss during a sync
-- `needs-investigation`: work that requires a mystery be solved by the core team before it can move forward
-- `needs-user-input`: we need more information from our users before the task can move forward
+### Bugs
 
-To be considered triaged, `bug` issues require a severity label: one of `p1`, `p2`, or `p3`, which are defined as follows:
- - `p1`: Affects a large population and inhibits work
- - `p2`: Affects more than a few users but doesn't prevent core functions
- - `p3`: Affects a small number of users or is largely cosmetic
+For bugs, the FR should engage with the issue and community with the goal to remove the `needs-triage` label from the issue.
+
+To be considered triaged, `bug` issues require the following:
+
+- A severity label `priority-1`, `priority-2`, and `priority-3`
+- Clearly defined Acceptance Criteria, added to the Issue as a standalone comment (see [example](https://github.com/cli/cli/issues/9469#issuecomment-2292315743))
+
+#### Bug severities
+
+| Severity | Description |
+| - | - |
+| `priority-1` | Affects a large population and inhibits work |
+| `priority-2` | Affects more than a few users but doesn't prevent core functions |
+| `priority-3` | Affects a small number of users or is largely cosmetic |
+
+### Enhancements and Docs
+
+For `enhancement` issues, the FR's role is to prepare the issue for team review and triage.
+
+When a new issue is opened, the FR **should**:
+
+- Acknowledge the issue
+- Assign themselves to the issue
+- Ensure there is enough information to understand the enhancement's scope and value
+- Ask the user for more information about value and use-case, if necessary
+- Leave the `needs-triage` label on the issue
+- Add the `more-info-needed` and `needs-investigation` labels as needed
+
+When the FR has enough information to be triaged, they should:
+- Remove the `more-info-needed` and `needs-investigation` labels
+- Remove their assignment from the issue
+
+The FR should **avoid**:
+
+- Thoroughly investigating the enhancement's technical feasibility
+- Prematurely accepting the enhancement request
+- Removing the `needs-triage` label
+- Labeling issues as `help wanted`
+
+## Additional triaging labels
+
+The FR can consider adding any of the following labels below.
+
+| Label | Description |
+| - | - |
+| `discuss` | Some issues require discussion with the internal team. Adding this label will automatically open up an internal discussion with the team to facilitate this discussion. |
+| `core` |  Defines what we would like to do internally. We tend to lean towards `help wanted` by default, and adding `core` should be reserved for trickier issues or implementations we have strong opinions/preferences about. |
+| `more-info-needed` | After asking any contributors for more information, add this label so it is clear that the issue has been responded to and we are waiting on the user. |
+| `needs-investigation` | Used when the issue requires further investigation before it can be reviewed and triaged. This is often used for issues that are not clearly bugs or enhancements, or when the FR needs to gather more information before proceeding. |
+| `invalid` | Added to spam and abusive issues. |
+
+### Labels for team enhancement triaging
+
+The FR should **avoid** adding these labels outside of team enhancement triage.
+
+| Label | Description |
+| - | - |
+| `good first issue` | Used to denote when an issue may be a good candidate for a first-time contributor to the CLI. These are usually small and well defined issues. |
+| `help wanted` | These issues are ready for community contribution. |
+| `help wanted candidate` | Used to denote when an issue may be a good candidate for community contribution. Issues labelled this way are discussed internally and may be promoted to `help wanted`. |
 
 ## Expectations for community pull requests
 
-All incoming pull requests are assigned to one of the engineers for review on a round-robin basis.
+All incoming pull requests are assigned to one of the engineers for review on a load-balanced basis.
 The person in a triage role for a week could take a glance at these pull requests, mostly to see whether
 the changeset is feasible and to allow the associated CI run for new contributors.
 
-## Issue triage flowchart
+## Spam and abuse
 
-- can this be closed outright?
-  - e.g. spam/junk
-  - close without comment
-- do we not want to do it?
-  - e.g. have already discussed not wanting to do or duplicate issue
-  - comment and close
-- are we ok with outside contribution for this?
-  - e.g. the task is relatively straightforward, but no people on our team have the bandwidth to take it on at the moment
-  - ensure that the thread contains all the context necessary for someone new to pick this up
-  - add `help wanted` label
-  - consider adding `good first issue` label
-- do we want to do it?
-  - comment acknowledging that
-  - add `core` label
-  - add to the project “TODO” column if this is something that should ship soon
-- is it intriguing, but requires discussion?
-  - label `discuss`
-  - label `needs-investigation` if engineering research is required before action can be taken
-- does it need more info from the issue author?
-  - ask the user for details
-  - add `needs-user-input` label
-- is it a usage/support question?
-  - consider converting the Issue to a Discussion
+The primary goal of triaging spam and abuse is to remove distracting and offensive content from our community.
+
+We get a lot of spam. Whenever you determine an issue as spam, add the `invalid` label and close it as "won't do". For spammy comments, simply mark them as spam using GitHub's built-in spam feature.
+
+Abusive contributions are defined by our [Code of Conduct](../.github/CODE-OF-CONDUCT.md). Any contribution you determine abusive should be removed. Repeat offenses or particularly offensive abuse should be reported using GitHub's reporting features and the user blocked. If an entire issue is abusive, label it as `invalid` and close as "won't do".
 
 ## Weekly PR audit
 

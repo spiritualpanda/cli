@@ -132,7 +132,9 @@ func getTunnelManager(tunnelProperties api.TunnelProperties, httpClient *http.Cl
 	}
 
 	// Create the tunnel manager
-	tunnelManager, err = tunnels.NewManager(userAgent, nil, url, httpClient)
+	// This api version seems to be the only acceptable api version: https://github.com/microsoft/dev-tunnels/blob/bf96ae5a128041d1a23f81d53a47e9e6c26fdc8d/go/tunnels/manager.go#L66
+	apiVersion := "2023-09-27-preview"
+	tunnelManager, err = tunnels.NewManager(userAgent, nil, url, httpClient, apiVersion)
 	if err != nil {
 		return nil, fmt.Errorf("error creating tunnel manager: %w", err)
 	}
@@ -141,7 +143,7 @@ func getTunnelManager(tunnelProperties api.TunnelProperties, httpClient *http.Cl
 }
 
 // getTunnelClient creates a tunnel client for the given tunnel.
-// The tunnel client is used to connect to the the tunnel and allows
+// The tunnel client is used to connect to the tunnel and allows
 // for ports to be forwarded locally.
 func getTunnelClient(ctx context.Context, tunnelManager *tunnels.Manager, tunnel *tunnels.Tunnel, options *tunnels.TunnelRequestOptions) (tunnelClient *TunnelClient, err error) {
 	// Get the tunnel that we want to connect to

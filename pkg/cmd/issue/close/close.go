@@ -21,7 +21,7 @@ type CloseOptions struct {
 	IO         *iostreams.IOStreams
 	BaseRepo   func() (ghrepo.Interface, error)
 
-	SelectorArg string
+	IssueNumber int
 	Comment     string
 	Reason      string
 
@@ -39,12 +39,22 @@ func NewCmdClose(f *cmdutil.Factory, runF func(*CloseOptions) error) *cobra.Comm
 		Short: "Close issue",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// support `-R, --repo` override
-			opts.BaseRepo = f.BaseRepo
-
-			if len(args) > 0 {
-				opts.SelectorArg = args[0]
+			issueNumber, baseRepo, err := shared.ParseIssueFromArg(args[0])
+			if err != nil {
+				return err
 			}
+
+			// If the args provided the base repo then use that directly.
+			if baseRepo, present := baseRepo.Value(); present {
+				opts.BaseRepo = func() (ghrepo.Interface, error) {
+					return baseRepo, nil
+				}
+			} else {
+				// support `-R, --repo` override
+				opts.BaseRepo = f.BaseRepo
+			}
+
+			opts.IssueNumber = issueNumber
 
 			if runF != nil {
 				return runF(opts)
@@ -67,13 +77,18 @@ func closeRun(opts *CloseOptions) error {
 		return err
 	}
 
-	issue, baseRepo, err := shared.IssueFromArgWithFields(httpClient, opts.BaseRepo, opts.SelectorArg, []string{"id", "number", "title", "state"})
+	baseRepo, err := opts.BaseRepo()
+	if err != nil {
+		return err
+	}
+
+	issue, err := shared.FindIssueOrPR(httpClient, baseRepo, opts.IssueNumber, []string{"id", "number", "title", "state"})
 	if err != nil {
 		return err
 	}
 
 	if issue.State == "CLOSED" {
-		fmt.Fprintf(opts.IO.ErrOut, "%s Issue #%d (%s) is already closed\n", cs.Yellow("!"), issue.Number, issue.Title)
+		fmt.Fprintf(opts.IO.ErrOut, "%s Issue %s#%d (%s) is already closed\n", cs.Yellow("!"), ghrepo.FullName(baseRepo), issue.Number, issue.Title)
 		return nil
 	}
 
@@ -98,7 +113,7 @@ func closeRun(opts *CloseOptions) error {
 		return err
 	}
 
-	fmt.Fprintf(opts.IO.ErrOut, "%s Closed issue #%d (%s)\n", cs.SuccessIconWithColor(cs.Red), issue.Number, issue.Title)
+	fmt.Fprintf(opts.IO.ErrOut, "%s Closed issue %s#%d (%s)\n", cs.SuccessIconWithColor(cs.Red), ghrepo.FullName(baseRepo), issue.Number, issue.Title)
 
 	return nil
 }
@@ -117,6 +132,7 @@ func apiClose(httpClient *http.Client, repo ghrepo.Interface, issue *api.Issue, 
 		if err != nil {
 			return err
 		}
+		// TODO stateReasonCleanup
 		if !features.StateReason {
 			// If StateReason is not supported silently close issue without setting StateReason.
 			reason = ""

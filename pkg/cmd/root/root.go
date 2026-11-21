@@ -6,16 +6,20 @@ import (
 	"strings"
 
 	"github.com/MakeNowJust/heredoc"
+	accessibilityCmd "github.com/cli/cli/v2/pkg/cmd/accessibility"
 	actionsCmd "github.com/cli/cli/v2/pkg/cmd/actions"
+	agentTaskCmd "github.com/cli/cli/v2/pkg/cmd/agent-task"
 	aliasCmd "github.com/cli/cli/v2/pkg/cmd/alias"
 	"github.com/cli/cli/v2/pkg/cmd/alias/shared"
 	apiCmd "github.com/cli/cli/v2/pkg/cmd/api"
+	attestationCmd "github.com/cli/cli/v2/pkg/cmd/attestation"
 	authCmd "github.com/cli/cli/v2/pkg/cmd/auth"
 	browseCmd "github.com/cli/cli/v2/pkg/cmd/browse"
 	cacheCmd "github.com/cli/cli/v2/pkg/cmd/cache"
 	codespaceCmd "github.com/cli/cli/v2/pkg/cmd/codespace"
 	completionCmd "github.com/cli/cli/v2/pkg/cmd/completion"
 	configCmd "github.com/cli/cli/v2/pkg/cmd/config"
+	copilotCmd "github.com/cli/cli/v2/pkg/cmd/copilot"
 	extensionCmd "github.com/cli/cli/v2/pkg/cmd/extension"
 	"github.com/cli/cli/v2/pkg/cmd/factory"
 	gistCmd "github.com/cli/cli/v2/pkg/cmd/gist"
@@ -24,6 +28,7 @@ import (
 	labelCmd "github.com/cli/cli/v2/pkg/cmd/label"
 	orgCmd "github.com/cli/cli/v2/pkg/cmd/org"
 	prCmd "github.com/cli/cli/v2/pkg/cmd/pr"
+	previewCmd "github.com/cli/cli/v2/pkg/cmd/preview"
 	projectCmd "github.com/cli/cli/v2/pkg/cmd/project"
 	releaseCmd "github.com/cli/cli/v2/pkg/cmd/release"
 	repoCmd "github.com/cli/cli/v2/pkg/cmd/repo"
@@ -121,11 +126,12 @@ func NewCmdRoot(f *cmdutil.Factory, version, buildDate string) (*cobra.Command, 
 
 	// Child commands
 	cmd.AddCommand(versionCmd.NewCmdVersion(f, version, buildDate))
+	cmd.AddCommand(accessibilityCmd.NewCmdAccessibility(f))
 	cmd.AddCommand(actionsCmd.NewCmdActions(f))
 	cmd.AddCommand(aliasCmd.NewCmdAlias(f))
 	cmd.AddCommand(authCmd.NewCmdAuth(f))
+	cmd.AddCommand(attestationCmd.NewCmdAttestation(f))
 	cmd.AddCommand(configCmd.NewCmdConfig(f))
-	cmd.AddCommand(creditsCmd.NewCmdCredits(f, nil))
 	cmd.AddCommand(gistCmd.NewCmdGist(f))
 	cmd.AddCommand(gpgKeyCmd.NewCmdGPGKey(f))
 	cmd.AddCommand(completionCmd.NewCmdCompletion(f.IOStreams))
@@ -134,14 +140,20 @@ func NewCmdRoot(f *cmdutil.Factory, version, buildDate string) (*cobra.Command, 
 	cmd.AddCommand(secretCmd.NewCmdSecret(f))
 	cmd.AddCommand(variableCmd.NewCmdVariable(f))
 	cmd.AddCommand(sshKeyCmd.NewCmdSSHKey(f))
-	cmd.AddCommand(statusCmd.NewCmdStatus(f, nil))
 	cmd.AddCommand(codespaceCmd.NewCmdCodespace(f))
 	cmd.AddCommand(projectCmd.NewCmdProject(f))
+	cmd.AddCommand(previewCmd.NewCmdPreview(f))
+
+	// Root commands with standalone functionality and no subcommands
+	cmd.AddCommand(copilotCmd.NewCmdCopilot(f, nil))
+	cmd.AddCommand(statusCmd.NewCmdStatus(f, nil))
+	cmd.AddCommand(creditsCmd.NewCmdCredits(f, nil))
 
 	// below here at the commands that require the "intelligent" BaseRepo resolver
 	repoResolvingCmdFactory := *f
 	repoResolvingCmdFactory.BaseRepo = factory.SmartBaseRepoFunc(f)
 
+	cmd.AddCommand(agentTaskCmd.NewCmdAgentTask(&repoResolvingCmdFactory))
 	cmd.AddCommand(browseCmd.NewCmdBrowse(&repoResolvingCmdFactory, nil))
 	cmd.AddCommand(prCmd.NewCmdPR(&repoResolvingCmdFactory))
 	cmd.AddCommand(orgCmd.NewCmdOrg(&repoResolvingCmdFactory))
@@ -170,7 +182,14 @@ func NewCmdRoot(f *cmdutil.Factory, version, buildDate string) (*cobra.Command, 
 	// Extensions
 	em := f.ExtensionManager
 	for _, e := range em.List() {
-		extensionCmd := NewCmdExtension(io, em, e)
+		extensionCmd := NewCmdExtension(io, em, e, nil)
+		// Don't register an extension command if it would
+		// conflict with a core command.
+		_, _, err := cmd.Find([]string{extensionCmd.Name()})
+		if err == nil {
+			continue
+		}
+
 		cmd.AddCommand(extensionCmd)
 	}
 

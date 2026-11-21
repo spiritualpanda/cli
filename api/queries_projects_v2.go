@@ -23,6 +23,7 @@ type ProjectV2 struct {
 	Number       int    `json:"number"`
 	ResourcePath string `json:"resourcePath"`
 	Closed       bool   `json:"closed"`
+	URL          string `json:"url"`
 }
 
 // UpdateProjectV2Items uses the addProjectV2ItemById and the deleteProjectV2Item mutations
@@ -61,12 +62,29 @@ func UpdateProjectV2Items(client *Client, repo ghrepo.Interface, addProjectItems
 
 // ProjectsV2ItemsForIssue fetches all ProjectItems for an issue.
 func ProjectsV2ItemsForIssue(client *Client, repo ghrepo.Interface, issue *Issue) error {
+	type projectV2ItemStatus struct {
+		StatusFragment struct {
+			OptionID string `json:"optionId"`
+			Name     string `json:"name"`
+		} `graphql:"... on ProjectV2ItemFieldSingleSelectValue"`
+	}
+
+	type projectV2Item struct {
+		ID      string `json:"id"`
+		Project struct {
+			ID    string `json:"id"`
+			Title string `json:"title"`
+		}
+		Status projectV2ItemStatus `graphql:"status:fieldValueByName(name: \"Status\")"`
+	}
+
 	type response struct {
 		Repository struct {
 			Issue struct {
 				ProjectItems struct {
-					Nodes    []*ProjectV2Item
-					PageInfo struct {
+					TotalCount int
+					Nodes      []*projectV2Item
+					PageInfo   struct {
 						HasNextPage bool
 						EndCursor   string
 					}
@@ -87,7 +105,23 @@ func ProjectsV2ItemsForIssue(client *Client, repo ghrepo.Interface, issue *Issue
 		if err != nil {
 			return err
 		}
-		items.Nodes = append(items.Nodes, query.Repository.Issue.ProjectItems.Nodes...)
+		for _, projectItemNode := range query.Repository.Issue.ProjectItems.Nodes {
+			if projectItemNode == nil {
+				continue
+			}
+			items.Nodes = append(items.Nodes, &ProjectV2Item{
+				ID: projectItemNode.ID,
+				Project: ProjectV2ItemProject{
+					ID:    projectItemNode.Project.ID,
+					Title: projectItemNode.Project.Title,
+				},
+				Status: ProjectV2ItemStatus{
+					OptionID: projectItemNode.Status.StatusFragment.OptionID,
+					Name:     projectItemNode.Status.StatusFragment.Name,
+				},
+			})
+		}
+
 		if !query.Repository.Issue.ProjectItems.PageInfo.HasNextPage {
 			break
 		}
@@ -99,12 +133,29 @@ func ProjectsV2ItemsForIssue(client *Client, repo ghrepo.Interface, issue *Issue
 
 // ProjectsV2ItemsForPullRequest fetches all ProjectItems for a pull request.
 func ProjectsV2ItemsForPullRequest(client *Client, repo ghrepo.Interface, pr *PullRequest) error {
+	type projectV2ItemStatus struct {
+		StatusFragment struct {
+			OptionID string `json:"optionId"`
+			Name     string `json:"name"`
+		} `graphql:"... on ProjectV2ItemFieldSingleSelectValue"`
+	}
+
+	type projectV2Item struct {
+		ID      string `json:"id"`
+		Project struct {
+			ID    string `json:"id"`
+			Title string `json:"title"`
+		}
+		Status projectV2ItemStatus `graphql:"status:fieldValueByName(name: \"Status\")"`
+	}
+
 	type response struct {
 		Repository struct {
 			PullRequest struct {
 				ProjectItems struct {
-					Nodes    []*ProjectV2Item
-					PageInfo struct {
+					TotalCount int
+					Nodes      []*projectV2Item
+					PageInfo   struct {
 						HasNextPage bool
 						EndCursor   string
 					}
@@ -125,7 +176,24 @@ func ProjectsV2ItemsForPullRequest(client *Client, repo ghrepo.Interface, pr *Pu
 		if err != nil {
 			return err
 		}
-		items.Nodes = append(items.Nodes, query.Repository.PullRequest.ProjectItems.Nodes...)
+
+		for _, projectItemNode := range query.Repository.PullRequest.ProjectItems.Nodes {
+			if projectItemNode == nil {
+				continue
+			}
+			items.Nodes = append(items.Nodes, &ProjectV2Item{
+				ID: projectItemNode.ID,
+				Project: ProjectV2ItemProject{
+					ID:    projectItemNode.Project.ID,
+					Title: projectItemNode.Project.Title,
+				},
+				Status: ProjectV2ItemStatus{
+					OptionID: projectItemNode.Status.StatusFragment.OptionID,
+					Name:     projectItemNode.Status.StatusFragment.Name,
+				},
+			})
+		}
+
 		if !query.Repository.PullRequest.ProjectItems.PageInfo.HasNextPage {
 			break
 		}
@@ -252,7 +320,7 @@ func CurrentUserProjectsV2(client *Client, hostname string) ([]ProjectV2, error)
 	return projectsV2, nil
 }
 
-// When querying ProjectsV2 fields we generally dont want to show the user
+// When querying ProjectsV2 fields we generally don't want to show the user
 // scope errors and field does not exist errors. ProjectsV2IgnorableError
 // checks against known error strings to see if an error can be safely ignored.
 // Due to the fact that the GraphQLClient can return multiple types of errors

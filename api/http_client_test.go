@@ -18,47 +18,46 @@ import (
 
 func TestNewHTTPClient(t *testing.T) {
 	type args struct {
-		config         tokenGetter
-		appVersion     string
-		setAccept      bool
-		logVerboseHTTP bool
+		config             tokenGetter
+		appVersion         string
+		logVerboseHTTP     bool
+		skipDefaultHeaders bool
 	}
 	tests := []struct {
 		name       string
 		args       args
 		host       string
-		wantHeader map[string]string
+		wantHeader map[string][]string
 		wantStderr string
 	}{
 		{
-			name: "github.com with Accept header",
+			name: "github.com",
 			args: args{
 				config:         tinyConfig{"github.com:oauth_token": "MYTOKEN"},
 				appVersion:     "v1.2.3",
-				setAccept:      true,
 				logVerboseHTTP: false,
 			},
 			host: "github.com",
-			wantHeader: map[string]string{
-				"authorization": "token MYTOKEN",
-				"user-agent":    "GitHub CLI v1.2.3",
-				"accept":        "application/vnd.github.merge-info-preview+json, application/vnd.github.nebula-preview",
+			wantHeader: map[string][]string{
+				"authorization":        {"token MYTOKEN"},
+				"user-agent":           {"GitHub CLI v1.2.3"},
+				"x-github-api-version": {"2022-11-28"},
+				"accept":               {"application/vnd.github.merge-info-preview+json, application/vnd.github.nebula-preview"},
 			},
 			wantStderr: "",
 		},
 		{
-			name: "github.com no Accept header",
+			name: "GHES",
 			args: args{
-				config:         tinyConfig{"github.com:oauth_token": "MYTOKEN"},
-				appVersion:     "v1.2.3",
-				setAccept:      false,
-				logVerboseHTTP: false,
+				config:     tinyConfig{"example.com:oauth_token": "GHETOKEN"},
+				appVersion: "v1.2.3",
 			},
-			host: "github.com",
-			wantHeader: map[string]string{
-				"authorization": "token MYTOKEN",
-				"user-agent":    "GitHub CLI v1.2.3",
-				"accept":        "",
+			host: "example.com",
+			wantHeader: map[string][]string{
+				"authorization":        {"token GHETOKEN"},
+				"user-agent":           {"GitHub CLI v1.2.3"},
+				"x-github-api-version": {"2022-11-28"},
+				"accept":               {"application/vnd.github.merge-info-preview+json, application/vnd.github.nebula-preview"},
 			},
 			wantStderr: "",
 		},
@@ -67,14 +66,30 @@ func TestNewHTTPClient(t *testing.T) {
 			args: args{
 				config:         tinyConfig{"example.com:oauth_token": "MYTOKEN"},
 				appVersion:     "v1.2.3",
-				setAccept:      true,
 				logVerboseHTTP: false,
 			},
 			host: "github.com",
-			wantHeader: map[string]string{
-				"authorization": "",
-				"user-agent":    "GitHub CLI v1.2.3",
-				"accept":        "application/vnd.github.merge-info-preview+json, application/vnd.github.nebula-preview",
+			wantHeader: map[string][]string{
+				"authorization":        nil, // should not be set
+				"user-agent":           {"GitHub CLI v1.2.3"},
+				"x-github-api-version": {"2022-11-28"},
+				"accept":               {"application/vnd.github.merge-info-preview+json, application/vnd.github.nebula-preview"},
+			},
+			wantStderr: "",
+		},
+		{
+			name: "GHES no authentication token",
+			args: args{
+				config:         tinyConfig{"github.com:oauth_token": "MYTOKEN"},
+				appVersion:     "v1.2.3",
+				logVerboseHTTP: false,
+			},
+			host: "example.com",
+			wantHeader: map[string][]string{
+				"authorization":        nil, // should not be set
+				"user-agent":           {"GitHub CLI v1.2.3"},
+				"x-github-api-version": {"2022-11-28"},
+				"accept":               {"application/vnd.github.merge-info-preview+json, application/vnd.github.nebula-preview"},
 			},
 			wantStderr: "",
 		},
@@ -83,14 +98,14 @@ func TestNewHTTPClient(t *testing.T) {
 			args: args{
 				config:         tinyConfig{"github.com:oauth_token": "MYTOKEN"},
 				appVersion:     "v1.2.3",
-				setAccept:      true,
 				logVerboseHTTP: true,
 			},
 			host: "github.com",
-			wantHeader: map[string]string{
-				"authorization": "token MYTOKEN",
-				"user-agent":    "GitHub CLI v1.2.3",
-				"accept":        "application/vnd.github.merge-info-preview+json, application/vnd.github.nebula-preview",
+			wantHeader: map[string][]string{
+				"authorization":        {"token MYTOKEN"},
+				"user-agent":           {"GitHub CLI v1.2.3"},
+				"x-github-api-version": {"2022-11-28"},
+				"accept":               {"application/vnd.github.merge-info-preview+json, application/vnd.github.nebula-preview"},
 			},
 			wantStderr: heredoc.Doc(`
 				* Request at <time>
@@ -102,6 +117,7 @@ func TestNewHTTPClient(t *testing.T) {
 				> Content-Type: application/json; charset=utf-8
 				> Time-Zone: <timezone>
 				> User-Agent: GitHub CLI v1.2.3
+				> X-Github-Api-Version: 2022-11-28
 
 				< HTTP/1.1 204 No Content
 				< Date: <time>
@@ -110,19 +126,34 @@ func TestNewHTTPClient(t *testing.T) {
 			`),
 		},
 		{
-			name: "GHES Accept header",
+			name: "respect skip default headers option",
 			args: args{
-				config:     tinyConfig{"example.com:oauth_token": "GHETOKEN"},
-				appVersion: "v1.2.3",
-				setAccept:  true,
+				appVersion:         "v1.2.3",
+				logVerboseHTTP:     true,
+				skipDefaultHeaders: true,
 			},
-			host: "example.com",
-			wantHeader: map[string]string{
-				"authorization": "token GHETOKEN",
-				"user-agent":    "GitHub CLI v1.2.3",
-				"accept":        "application/vnd.github.merge-info-preview+json, application/vnd.github.nebula-preview",
+			host: "github.com",
+			wantHeader: map[string][]string{
+				"accept":               nil,
+				"authorization":        nil,
+				"content-type":         nil,
+				"user-agent":           {"GitHub CLI v1.2.3"},
+				"x-github-api-version": {"2022-11-28"},
 			},
-			wantStderr: "",
+			wantStderr: heredoc.Doc(`
+				* Request at <time>
+				* Request to http://<host>:<port>
+				> GET / HTTP/1.1
+				> Host: github.com
+				> Time-Zone: <timezone>
+				> User-Agent: GitHub CLI v1.2.3
+				> X-Github-Api-Version: 2022-11-28
+
+				< HTTP/1.1 204 No Content
+				< Date: <time>
+
+				* Request took <duration>
+			`),
 		},
 	}
 
@@ -137,11 +168,11 @@ func TestNewHTTPClient(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ios, _, _, stderr := iostreams.Test()
 			client, err := NewHTTPClient(HTTPClientOptions{
-				AppVersion:        tt.args.appVersion,
-				Config:            tt.args.config,
-				Log:               ios.ErrOut,
-				SkipAcceptHeaders: !tt.args.setAccept,
-				LogVerboseHTTP:    tt.args.logVerboseHTTP,
+				AppVersion:         tt.args.appVersion,
+				Config:             tt.args.config,
+				Log:                ios.ErrOut,
+				LogVerboseHTTP:     tt.args.logVerboseHTTP,
+				SkipDefaultHeaders: tt.args.skipDefaultHeaders,
 			})
 			require.NoError(t, err)
 
@@ -155,7 +186,7 @@ func TestNewHTTPClient(t *testing.T) {
 			require.NoError(t, err)
 
 			for name, value := range tt.wantHeader {
-				assert.Equal(t, value, gotReq.Header.Get(name), name)
+				assert.Equal(t, value, gotReq.Header.Values(name), name)
 			}
 
 			assert.Equal(t, 204, res.StatusCode)
@@ -229,7 +260,7 @@ func TestHTTPClientSanitizeJSONControlCharactersC0(t *testing.T) {
 	err = json.Unmarshal(body, &issue)
 	require.NoError(t, err)
 	assert.Equal(t, "^[[31mRed Title^[[0m", issue.Title)
-	assert.Equal(t, "1^A 2^B 3^C 4^D 5^E 6^F 7^G 8^H 9\t A\r\n B\v C^L D\r\n E^N F^O", issue.Body)
+	assert.Equal(t, "1^A 2^B 3^C 4^D 5^E 6^F 7^G 8\b 9\t A\r\n B\v C\f D\r\n E^N F^O", issue.Body)
 	assert.Equal(t, "10^P 11^Q 12^R 13^S 14^T 15^U 16^V 17^W 18^X 19^Y 1A^Z 1B^[ 1C^\\ 1D^] 1E^^ 1F^_", issue.Author.Name)
 	assert.Equal(t, "monalisa \\u00^[", issue.Author.Login)
 	assert.Equal(t, "Escaped ^[ \\^[ \\^[ \\\\^[", issue.ActiveLockReason)
@@ -272,7 +303,7 @@ func TestHTTPClientSanitizeControlCharactersC1(t *testing.T) {
 
 type tinyConfig map[string]string
 
-func (c tinyConfig) Token(host string) (string, string) {
+func (c tinyConfig) ActiveToken(host string) (string, string) {
 	return c[fmt.Sprintf("%s:%s", host, "oauth_token")], "oauth_token"
 }
 

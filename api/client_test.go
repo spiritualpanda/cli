@@ -234,10 +234,9 @@ func TestHTTPHeaders(t *testing.T) {
 
 	ios, _, _, stderr := iostreams.Test()
 	httpClient, err := NewHTTPClient(HTTPClientOptions{
-		AppVersion:        "v1.2.3",
-		Config:            tinyConfig{ts.URL[7:] + ":oauth_token": "MYTOKEN"},
-		Log:               ios.ErrOut,
-		SkipAcceptHeaders: false,
+		AppVersion: "v1.2.3",
+		Config:     tinyConfig{ts.URL[7:] + ":oauth_token": "MYTOKEN"},
+		Log:        ios.ErrOut,
 	})
 	assert.NoError(t, err)
 	client := NewClientFromHTTP(httpClient)
@@ -246,10 +245,11 @@ func TestHTTPHeaders(t *testing.T) {
 	assert.NoError(t, err)
 
 	wantHeader := map[string]string{
-		"Accept":        "application/vnd.github.merge-info-preview+json, application/vnd.github.nebula-preview",
-		"Authorization": "token MYTOKEN",
-		"Content-Type":  "application/json; charset=utf-8",
-		"User-Agent":    "GitHub CLI v1.2.3",
+		"Accept":               "application/vnd.github.merge-info-preview+json, application/vnd.github.nebula-preview",
+		"Authorization":        "token MYTOKEN",
+		"Content-Type":         "application/json; charset=utf-8",
+		"User-Agent":           "GitHub CLI v1.2.3",
+		"X-GitHub-Api-Version": "2022-11-28",
 	}
 	for name, value := range wantHeader {
 		assert.Equal(t, value, gotReq.Header.Get(name), name)

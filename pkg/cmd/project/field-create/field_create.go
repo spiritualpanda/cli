@@ -6,7 +6,6 @@ import (
 
 	"github.com/MakeNowJust/heredoc"
 	"github.com/cli/cli/v2/pkg/cmd/project/shared/client"
-	"github.com/cli/cli/v2/pkg/cmd/project/shared/format"
 	"github.com/cli/cli/v2/pkg/cmd/project/shared/queries"
 	"github.com/cli/cli/v2/pkg/cmdutil"
 	"github.com/cli/cli/v2/pkg/iostreams"
@@ -21,7 +20,7 @@ type createFieldOpts struct {
 	singleSelectOptions []string
 	number              int32
 	projectID           string
-	format              string
+	exporter            cmdutil.Exporter
 }
 
 type createFieldConfig struct {
@@ -42,11 +41,11 @@ func NewCmdCreateField(f *cmdutil.Factory, runF func(config createFieldConfig) e
 		Short: "Create a field in a project",
 		Use:   "field-create [<number>]",
 		Example: heredoc.Doc(`
-			# create a field in the current user's project "1"
-			gh project field-create 1 --owner "@me" --name "new field" --data-type "text"
+			# Create a field in the current user's project "1"
+			$ gh project field-create 1 --owner "@me" --name "new field" --data-type "text"
 
-			# create a field with three options to select from for owner monalisa
-			gh project field-create 1 --owner monalisa --name "new field" --data-type "SINGLE_SELECT" --single-select-options "one,two,three"
+			# Create a field with three options to select from for owner monalisa
+			$ gh project field-create 1 --owner monalisa --name "new field" --data-type "SINGLE_SELECT" --single-select-options "one,two,three"
 		`),
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -85,7 +84,7 @@ func NewCmdCreateField(f *cmdutil.Factory, runF func(config createFieldConfig) e
 	createFieldCmd.Flags().StringVar(&opts.name, "name", "", "Name of the new field")
 	cmdutil.StringEnumFlag(createFieldCmd, &opts.dataType, "data-type", "", "", []string{"TEXT", "SINGLE_SELECT", "DATE", "NUMBER"}, "DataType of the new field.")
 	createFieldCmd.Flags().StringSliceVar(&opts.singleSelectOptions, "single-select-options", []string{}, "Options for SINGLE_SELECT data type")
-	cmdutil.StringEnumFlag(createFieldCmd, &opts.format, "format", "", "", []string{"json"}, "Output format")
+	cmdutil.AddFormatFlags(createFieldCmd, &opts.exporter)
 
 	_ = createFieldCmd.MarkFlagRequired("name")
 	_ = createFieldCmd.MarkFlagRequired("data-type")
@@ -113,8 +112,8 @@ func runCreateField(config createFieldConfig) error {
 		return err
 	}
 
-	if config.opts.format == "json" {
-		return printJSON(config, query.CreateProjectV2Field.Field)
+	if config.opts.exporter != nil {
+		return config.opts.exporter.Write(config.io, query.CreateProjectV2Field.Field)
 	}
 
 	return printResults(config, query.CreateProjectV2Field.Field)
@@ -149,15 +148,5 @@ func printResults(config createFieldConfig, field queries.ProjectField) error {
 	}
 
 	_, err := fmt.Fprintf(config.io.Out, "Created field\n")
-	return err
-}
-
-func printJSON(config createFieldConfig, field queries.ProjectField) error {
-	b, err := format.JSONProjectField(field)
-	if err != nil {
-		return err
-	}
-
-	_, err = config.io.Out.Write(b)
 	return err
 }

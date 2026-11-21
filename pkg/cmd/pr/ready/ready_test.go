@@ -124,7 +124,7 @@ func TestPRReady(t *testing.T) {
 	http := &httpmock.Registry{}
 	defer http.Verify(t)
 
-	shared.RunCommandFinder("123", &api.PullRequest{
+	shared.StubFinderForRunCommandStyleTests(t, "123", &api.PullRequest{
 		ID:      "THE-ID",
 		Number:  123,
 		State:   "OPEN",
@@ -142,14 +142,14 @@ func TestPRReady(t *testing.T) {
 	output, err := runCommand(http, true, "123")
 	assert.NoError(t, err)
 	assert.Equal(t, "", output.String())
-	assert.Equal(t, "✓ Pull request #123 is marked as \"ready for review\"\n", output.Stderr())
+	assert.Equal(t, "✓ Pull request OWNER/REPO#123 is marked as \"ready for review\"\n", output.Stderr())
 }
 
 func TestPRReady_alreadyReady(t *testing.T) {
 	http := &httpmock.Registry{}
 	defer http.Verify(t)
 
-	shared.RunCommandFinder("123", &api.PullRequest{
+	shared.StubFinderForRunCommandStyleTests(t, "123", &api.PullRequest{
 		ID:      "THE-ID",
 		Number:  123,
 		State:   "OPEN",
@@ -159,14 +159,14 @@ func TestPRReady_alreadyReady(t *testing.T) {
 	output, err := runCommand(http, true, "123")
 	assert.NoError(t, err)
 	assert.Equal(t, "", output.String())
-	assert.Equal(t, "! Pull request #123 is already \"ready for review\"\n", output.Stderr())
+	assert.Equal(t, "! Pull request OWNER/REPO#123 is already \"ready for review\"\n", output.Stderr())
 }
 
 func TestPRReadyUndo(t *testing.T) {
 	http := &httpmock.Registry{}
 	defer http.Verify(t)
 
-	shared.RunCommandFinder("123", &api.PullRequest{
+	shared.StubFinderForRunCommandStyleTests(t, "123", &api.PullRequest{
 		ID:      "THE-ID",
 		Number:  123,
 		State:   "OPEN",
@@ -184,14 +184,14 @@ func TestPRReadyUndo(t *testing.T) {
 	output, err := runCommand(http, true, "123 --undo")
 	assert.NoError(t, err)
 	assert.Equal(t, "", output.String())
-	assert.Equal(t, "✓ Pull request #123 is converted to \"draft\"\n", output.Stderr())
+	assert.Equal(t, "✓ Pull request OWNER/REPO#123 is converted to \"draft\"\n", output.Stderr())
 }
 
 func TestPRReadyUndo_alreadyDraft(t *testing.T) {
 	http := &httpmock.Registry{}
 	defer http.Verify(t)
 
-	shared.RunCommandFinder("123", &api.PullRequest{
+	shared.StubFinderForRunCommandStyleTests(t, "123", &api.PullRequest{
 		ID:      "THE-ID",
 		Number:  123,
 		State:   "OPEN",
@@ -201,14 +201,14 @@ func TestPRReadyUndo_alreadyDraft(t *testing.T) {
 	output, err := runCommand(http, true, "123 --undo")
 	assert.NoError(t, err)
 	assert.Equal(t, "", output.String())
-	assert.Equal(t, "! Pull request #123 is already \"in draft\"\n", output.Stderr())
+	assert.Equal(t, "! Pull request OWNER/REPO#123 is already \"in draft\"\n", output.Stderr())
 }
 
 func TestPRReady_closed(t *testing.T) {
 	http := &httpmock.Registry{}
 	defer http.Verify(t)
 
-	shared.RunCommandFinder("123", &api.PullRequest{
+	shared.StubFinderForRunCommandStyleTests(t, "123", &api.PullRequest{
 		ID:      "THE-ID",
 		Number:  123,
 		State:   "CLOSED",
@@ -218,5 +218,5 @@ func TestPRReady_closed(t *testing.T) {
 	output, err := runCommand(http, true, "123")
 	assert.EqualError(t, err, "SilentError")
 	assert.Equal(t, "", output.String())
-	assert.Equal(t, "X Pull request #123 is closed. Only draft pull requests can be marked as \"ready for review\"\n", output.Stderr())
+	assert.Equal(t, "X Pull request OWNER/REPO#123 is closed. Only draft pull requests can be marked as \"ready for review\"\n", output.Stderr())
 }

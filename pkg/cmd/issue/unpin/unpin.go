@@ -6,7 +6,7 @@ import (
 
 	"github.com/MakeNowJust/heredoc"
 	"github.com/cli/cli/v2/api"
-	"github.com/cli/cli/v2/internal/config"
+	"github.com/cli/cli/v2/internal/gh"
 	"github.com/cli/cli/v2/internal/ghrepo"
 	"github.com/cli/cli/v2/pkg/cmd/issue/shared"
 	"github.com/cli/cli/v2/pkg/cmdutil"
@@ -16,11 +16,12 @@ import (
 )
 
 type UnpinOptions struct {
-	HttpClient  func() (*http.Client, error)
-	Config      func() (config.Config, error)
-	IO          *iostreams.IOStreams
-	BaseRepo    func() (ghrepo.Interface, error)
-	SelectorArg string
+	HttpClient func() (*http.Client, error)
+	Config     func() (gh.Config, error)
+	IO         *iostreams.IOStreams
+	BaseRepo   func() (ghrepo.Interface, error)
+
+	IssueNumber int
 }
 
 func NewCmdUnpin(f *cmdutil.Factory, runF func(*UnpinOptions) error) *cobra.Command {
@@ -51,8 +52,22 @@ func NewCmdUnpin(f *cmdutil.Factory, runF func(*UnpinOptions) error) *cobra.Comm
 		`),
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			opts.BaseRepo = f.BaseRepo
-			opts.SelectorArg = args[0]
+			issueNumber, baseRepo, err := shared.ParseIssueFromArg(args[0])
+			if err != nil {
+				return err
+			}
+
+			// If the args provided the base repo then use that directly.
+			if baseRepo, present := baseRepo.Value(); present {
+				opts.BaseRepo = func() (ghrepo.Interface, error) {
+					return baseRepo, nil
+				}
+			} else {
+				// support `-R, --repo` override
+				opts.BaseRepo = f.BaseRepo
+			}
+
+			opts.IssueNumber = issueNumber
 
 			if runF != nil {
 				return runF(opts)
@@ -73,13 +88,18 @@ func unpinRun(opts *UnpinOptions) error {
 		return err
 	}
 
-	issue, baseRepo, err := shared.IssueFromArgWithFields(httpClient, opts.BaseRepo, opts.SelectorArg, []string{"id", "number", "title", "isPinned"})
+	baseRepo, err := opts.BaseRepo()
+	if err != nil {
+		return err
+	}
+
+	issue, err := shared.FindIssueOrPR(httpClient, baseRepo, opts.IssueNumber, []string{"id", "number", "title", "isPinned"})
 	if err != nil {
 		return err
 	}
 
 	if !issue.IsPinned {
-		fmt.Fprintf(opts.IO.ErrOut, "%s Issue #%d (%s) is not pinned to %s\n", cs.Yellow("!"), issue.Number, issue.Title, ghrepo.FullName(baseRepo))
+		fmt.Fprintf(opts.IO.ErrOut, "%s Issue %s#%d (%s) is not pinned\n", cs.Yellow("!"), ghrepo.FullName(baseRepo), issue.Number, issue.Title)
 		return nil
 	}
 
@@ -88,7 +108,7 @@ func unpinRun(opts *UnpinOptions) error {
 		return err
 	}
 
-	fmt.Fprintf(opts.IO.ErrOut, "%s Unpinned issue #%d (%s) from %s\n", cs.SuccessIconWithColor(cs.Red), issue.Number, issue.Title, ghrepo.FullName(baseRepo))
+	fmt.Fprintf(opts.IO.ErrOut, "%s Unpinned issue %s#%d (%s)\n", cs.SuccessIconWithColor(cs.Red), ghrepo.FullName(baseRepo), issue.Number, issue.Title)
 
 	return nil
 }

@@ -20,7 +20,6 @@ import (
 	"github.com/cli/cli/v2/internal/codespaces/api"
 	"github.com/cli/cli/v2/internal/codespaces/portforwarder"
 	"github.com/cli/cli/v2/internal/codespaces/rpc"
-	"github.com/cli/cli/v2/internal/config"
 	"github.com/cli/cli/v2/pkg/cmdutil"
 	"github.com/cli/cli/v2/pkg/ssh"
 	"github.com/cli/safeexec"
@@ -53,39 +52,39 @@ func newSSHCmd(app *App) *cobra.Command {
 	sshCmd := &cobra.Command{
 		Use:   "ssh [<flags>...] [-- <ssh-flags>...] [<command>]",
 		Short: "SSH into a codespace",
-		Long: heredoc.Doc(`
-			The 'ssh' command is used to SSH into a codespace. In its simplest form, you can
-			run 'gh cs ssh', select a codespace interactively, and connect.
-			
-			The 'ssh' command will automatically create a public/private ssh key pair in the
-			~/.ssh directory if you do not have an existing valid key pair. When selecting the
+		Long: heredoc.Docf(`
+			The %[1]sssh%[1]s command is used to SSH into a codespace. In its simplest form, you can
+			run %[1]sgh cs ssh%[1]s, select a codespace interactively, and connect.
+
+			The %[1]sssh%[1]s command will automatically create a public/private ssh key pair in the
+			%[1]s~/.ssh%[1]s directory if you do not have an existing valid key pair. When selecting the
 			key pair to use, the preferred order is:
-			  
-			1. Key specified by -i in <ssh-flags>
+
+			1. Key specified by %[1]s-i%[1]s in %[1]s<ssh-flags>%[1]s
 			2. Automatic key, if it already exists
-			3. First valid key pair in ssh config (according to ssh -G)
+			3. First valid key pair in ssh config (according to %[1]sssh -G%[1]s)
 			4. Automatic key, newly created
 
-			The 'ssh' command also supports deeper integration with OpenSSH using a '--config'
+			The %[1]sssh%[1]s command also supports deeper integration with OpenSSH using a %[1]s--config%[1]s
 			option that generates per-codespace ssh configuration in OpenSSH format.
-			Including this configuration in your ~/.ssh/config improves the user experience
-			of tools that integrate with OpenSSH, such as bash/zsh completion of ssh hostnames,
-			remote path completion for scp/rsync/sshfs, git ssh remotes, and so on.
+			Including this configuration in your %[1]s~/.ssh/config%[1]s improves the user experience
+			of tools that integrate with OpenSSH, such as Bash/Zsh completion of ssh hostnames,
+			remote path completion for %[1]sscp/rsync/sshfs%[1]s, %[1]sgit%[1]s ssh remotes, and so on.
 
 			Once that is set up (see the second example below), you can ssh to codespaces as
-			if they were ordinary remote hosts (using 'ssh', not 'gh cs ssh').
+			if they were ordinary remote hosts (using %[1]sssh%[1]s, not %[1]sgh cs ssh%[1]s).
 
 			Note that the codespace you are connecting to must have an SSH server pre-installed.
 			If the docker image being used for the codespace does not have an SSH server,
-			install it in your Dockerfile or, for codespaces that use Debian-based images,
-			you can add the following to your devcontainer.json:
+			install it in your %[1]sDockerfile%[1]s or, for codespaces that use Debian-based images,
+			you can add the following to your %[1]sdevcontainer.json%[1]s:
 
-			"features": {
-				"ghcr.io/devcontainers/features/sshd:1": {
-					"version": "latest"
+				"features": {
+					"ghcr.io/devcontainers/features/sshd:1": {
+						"version": "latest"
+					}
 				}
-			}
-		`),
+		`, "`"),
 		Example: heredoc.Doc(`
 			$ gh codespace ssh
 
@@ -276,16 +275,28 @@ func (a *App) SSH(ctx context.Context, sshArgs []string, opts sshOptions) (err e
 
 	shellClosed := make(chan error, 1)
 	go func() {
-		var err error
 		if opts.scpArgs != nil {
 			// args is the correct variable to use here, we just use scpArgs as the check for which command to run
-			err = codespaces.Copy(ctx, args, localSSHServerPort, connectDestination)
+			shellClosed <- codespaces.Copy(ctx, args, localSSHServerPort, connectDestination)
 		} else {
-			err = codespaces.Shell(
-				ctx, a.errLogger, args, localSSHServerPort, connectDestination, opts.printConnDetails,
+			// Parse the ssh args to determine if the user specified a command
+			args, command, err := codespaces.ParseSSHArgs(args)
+			if err != nil {
+				shellClosed <- err
+				return
+			}
+
+			// If the user specified a command, we need to keep the shell alive
+			// since it will be non-interactive and the codespace might shut down
+			// before the command finishes
+			if command != nil {
+				invoker.KeepAlive()
+			}
+
+			shellClosed <- codespaces.Shell(
+				ctx, a.errLogger, args, command, localSSHServerPort, connectDestination, opts.printConnDetails,
 			)
 		}
-		shellClosed <- err
 	}()
 
 	select {
@@ -324,10 +335,20 @@ func selectSSHKeys(
 				return nil, false, errors.New("missing value to -i argument")
 			}
 
+			privateKeyPath := args[i+1]
+
+			// The --config setup will set the automatic key with -i, but it might not actually be created, so we need to ensure that here
+			if automaticPrivateKeyPath, _ := automaticPrivateKeyPath(sshContext); automaticPrivateKeyPath == privateKeyPath {
+				_, err := generateAutomaticSSHKeys(sshContext)
+				if err != nil {
+					return nil, false, fmt.Errorf("generating automatic keypair: %w", err)
+				}
+			}
+
 			// User manually specified an identity file so just trust it is correct
 			return &ssh.KeyPair{
-				PrivateKeyPath: args[i+1],
-				PublicKeyPath:  args[i+1] + ".pub",
+				PrivateKeyPath: privateKeyPath,
+				PublicKeyPath:  privateKeyPath + ".pub",
 			}, false, nil
 		}
 
@@ -563,9 +584,8 @@ func (a *App) printOpenSSHConfig(ctx context.Context, opts sshOptions) (err erro
 			continue
 		}
 
-		cs := cs
 		wg.Add(1)
-		go func() {
+		go func(cs *api.Codespace) {
 			result := sshResult{}
 			defer wg.Done()
 
@@ -601,7 +621,7 @@ func (a *App) printOpenSSHConfig(ctx context.Context, opts sshOptions) (err erro
 
 			result.codespace = cs
 			sshUsers <- result
-		}()
+		}(cs)
 	}
 
 	go func() {
@@ -624,7 +644,8 @@ func (a *App) printOpenSSHConfig(ctx context.Context, opts sshOptions) (err erro
 		return fmt.Errorf("error formatting template: %w", err)
 	}
 
-	automaticIdentityFilePath, err := automaticPrivateKeyPath()
+	sshContext := ssh.Context{}
+	automaticIdentityFilePath, err := automaticPrivateKeyPath(sshContext)
 	if err != nil {
 		return fmt.Errorf("error finding .ssh directory: %w", err)
 	}
@@ -671,8 +692,8 @@ func (a *App) printOpenSSHConfig(ctx context.Context, opts sshOptions) (err erro
 	return status
 }
 
-func automaticPrivateKeyPath() (string, error) {
-	sshDir, err := config.HomeDirPath(".ssh")
+func automaticPrivateKeyPath(sshContext ssh.Context) (string, error) {
+	sshDir, err := sshContext.SshDir()
 	if err != nil {
 		return "", err
 	}
@@ -693,7 +714,7 @@ func newCpCmd(app *App) *cobra.Command {
 		Use:   "cp [-e] [-r] [-- [<scp flags>...]] <sources>... <dest>",
 		Short: "Copy files between local and remote file systems",
 		Long: heredoc.Docf(`
-			The cp command copies files between the local and remote file systems.
+			The %[1]scp%[1]s command copies files between the local and remote file systems.
 
 			As with the UNIX %[1]scp%[1]s command, the first argument specifies the source and the last
 			specifies the destination; additional sources may be specified after the first,
@@ -701,7 +722,7 @@ func newCpCmd(app *App) *cobra.Command {
 
 			The %[1]s--recursive%[1]s flag is required if any source is a directory.
 
-			A "remote:" prefix on any file name argument indicates that it refers to
+			A %[1]sremote:%[1]s prefix on any file name argument indicates that it refers to
 			the file system of the remote (Codespace) machine. It is resolved relative
 			to the home directory of the remote user.
 
@@ -710,9 +731,9 @@ func newCpCmd(app *App) *cobra.Command {
 			be evaluated on the remote machine, subject to expansion of tildes, braces, globs,
 			environment variables, and backticks. For security, do not use this flag with arguments
 			provided by untrusted users; see <https://lwn.net/Articles/835962/> for discussion.
-			
-			By default, the 'cp' command will create a public/private ssh key pair to authenticate with 
-			the codespace inside the ~/.ssh directory.
+
+			By default, the %[1]scp%[1]s command will create a public/private ssh key pair to authenticate with
+			the codespace inside the %[1]s~/.ssh directory%[1]s.
 		`, "`"),
 		Example: heredoc.Doc(`
 			$ gh codespace cp -e README.md 'remote:/workspaces/$RepositoryName/'
